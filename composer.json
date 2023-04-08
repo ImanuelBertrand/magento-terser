@@ -1,0 +1,16 @@
+{
+  "name": "ibertrand/magento2-terser",
+  "description": "A Bash script that minifies JavaScript files in a Magento installation",
+  "type": "binary",
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "Imanuel Bertrand",
+      "email": "imanuel@bertrand.one"
+    }
+  ],
+  "require": {},
+  "bin": [
+    "bin/minify-m2-scripts.sh"
+  ]
+}
