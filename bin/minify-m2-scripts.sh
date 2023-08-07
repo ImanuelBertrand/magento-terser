@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
 
-# This script minifies all JavaScript files in the pub/static/frontend directory of a Magento installation,
-# except for those that are already minified or the requirejs-bundle-config.js file.
-
 # Check if the terser command is available.
 if ! command -v terser &> /dev/null; then
     if command -v npm &> /dev/null; then
@@ -20,13 +17,90 @@ if [ ! -d "pub/static/frontend" ]; then
     exit 1
 fi
 
-# Check if the script is started with the -v or --verbose flag.
+# Default values
 verbose=0
-for arg in "$@"; do
-    if [ "$arg" = "-v" ] || [ "$arg" = "--verbose" ]; then
-        verbose=1
-    fi
+max_jobs=1
+pids=()
+
+# Parse arguments
+while (( $# )); do
+    case $1 in
+        -j)
+            if [[ ${2} =~ ^[0-9]+$ ]]; then
+                max_jobs="$2"
+                shift
+            else
+                echo "ERROR: Option requires an argument -- 'j'"
+                exit 1
+            fi
+            shift
+        ;;
+        -j*)
+            if [[ ${1#-j} =~ ^[0-9]+$ ]]; then
+                max_jobs="${1#-j}"
+            else
+                echo "ERROR: Option requires a valid number as an argument following -j (e.g. -j3)"
+                exit 1
+            fi
+            shift
+        ;;
+        --jobs=*)
+            max_jobs="${1#*=}"
+            shift
+        ;;
+        -v|--verbose)
+            verbose=1
+            shift
+        ;;
+        -h|--help)
+            echo "Usage: $0 [-j NUM_JOBS] [-v]"
+            echo ""
+            echo "Options:"
+            echo "  -j NUM_JOBS, --jobs=NUM_JOBS   The number of jobs to run in parallel. Default is 1."
+            echo "  -v, --verbose                  Enable verbose mode."
+            echo "  -h, --help                     Display this help message and exit."
+            exit 0
+        ;;
+        *)
+            # Unknown option
+            shift
+        ;;
+    esac
 done
+
+# Function to wait for a free slot in the jobs pool
+wait_for_slot() {
+    while : ; do
+        new_pids=()
+        for pid in "${pids[@]}"; do
+            # If the process is still running, add it to the new_pids array
+            if kill -0 "$pid" 2>/dev/null; then
+                new_pids+=("$pid")
+            else
+                # A job has finished. Update the progress bar.
+                processed_files=$((processed_files+1))
+                bar_length=$((processed_files * 50 / num_files))
+                printf "\r["
+                for _ in $(seq 1 $bar_length); do
+                    printf "="
+                done
+                for _ in $(seq 1 $((50 - bar_length))); do
+                    printf " "
+                done
+                printf "] %d/%d" "$processed_files" "$num_files"
+            fi
+        done
+        pids=("${new_pids[@]}")
+        # If there's a free slot, break the loop
+        (( ${#pids[@]} < max_jobs )) && return
+        sleep 0.1
+    done
+}
+
+run_terser() {
+    local file=$1
+    terser -c -m reserved=['$','jQuery','define','require','exports'] -o "$file" "$file" || printf "\rERROR: Failed to minify %s\n" "$file"
+}
 
 # Count the number of JavaScript files that need to be minified.
 num_files=$(find pub/static/frontend/ -name '*.js' -not -name '*.min.js' -not -name 'requirejs-bundle-config.js' | wc -l)
@@ -34,32 +108,25 @@ processed_files=0
 
 # Find all JavaScript files in the pub/static/frontend directory that need to be minified.
 # Use the -print0 option to handle filenames with spaces and other special characters.
-find pub/static/frontend/ -name '*.js' -not -name '*.min.js' -not -name 'requirejs-bundle-config.js' -print0 | while IFS= read -r -d $'\0' file; do
+while IFS= read -r -d $'\0' file; do
+    wait_for_slot
+
     # Print the filename if the script is started with the -v or --verbose flag.
     if [ $verbose -eq 1 ]; then
-        printf "\rMinifying $file\n"
+        printf "\rMinifying %s\n" "$file"
     fi
 
-    # Calculate the length of the progress bar.
-    bar_length=$((processed_files * 50 / num_files))
-    # Display the progress bar.
-    printf "\r["
-    for i in $(seq 1 $bar_length); do
-        printf "="
-    done
-    for i in $(seq 1 $((50 - bar_length))); do
-        printf " "
-    done
-    printf "] %d/%d" $processed_files $num_files
+    # Minify the JavaScript file using the terser command in the background
+    run_terser "$file" &
+    pids+=("$!")
 
-    # Minify the JavaScript file using the terser command.
-    terser -c -m reserved=['$','jQuery','define','require','exports'] -o "$file" "$file"
-    # Check the return code of the terser command and display an error message if it failed.
-    if [ $? -ne 0 ]; then
-        echo "\rERROR: Failed to minify $file.\n"
-    fi
-    processed_files=$((processed_files+1))
+    sleep 0.1
 
+done < <(find pub/static/frontend/ -name '*.js' -not -name '*.min.js' -not -name 'requirejs-bundle-config.js' -print0)
+
+# After the find loop, wait for remaining jobs
+for pid in "${pids[@]}"; do
+    wait "$pid"
 done
 
 # Move the cursor to the next line after the progress bar is finished.
