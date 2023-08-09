@@ -70,9 +70,11 @@ while (( $# )); do
         --no-progress-bar)
             display_progress_bar=0
             shift
+        ;;
         --silent)
             silent=1
             shift
+        ;;
         *)
             # Unknown option
             shift
