@@ -25,6 +25,8 @@ fi
 verbose=0
 max_jobs=1
 pids=()
+display_progress_bar=1
+silent=0
 
 # Parse arguments
 while (( $# )); do
@@ -65,12 +67,22 @@ while (( $# )); do
             echo "  -h, --help                     Display this help message and exit."
             exit 0
         ;;
+        --no-progress-bar)
+            display_progress_bar=0
+            shift
+        --silent)
+            silent=1
+            shift
         *)
             # Unknown option
             shift
         ;;
     esac
 done
+
+if (( silent )); then
+    display_progress_bar=0
+fi
 
 # Function to wait for a free slot in the jobs pool
 wait_for_slot() {
@@ -82,16 +94,18 @@ wait_for_slot() {
                 new_pids+=("$pid")
             else
                 # A job has finished. Update the progress bar.
-                processed_files=$((processed_files+1))
-                bar_length=$((processed_files * 50 / num_files))
-                printf "\r["
-                for _ in $(seq 1 $bar_length); do
-                    printf "="
-                done
-                for _ in $(seq 1 $((50 - bar_length))); do
-                    printf " "
-                done
-                printf "] %d/%d" "$processed_files" "$num_files"
+                if (( display_progress_bar )); then
+                    processed_files=$((processed_files+1))
+                    bar_length=$((processed_files * 50 / num_files))
+                    printf "\r["
+                    for _ in $(seq 1 $bar_length); do
+                        printf "="
+                    done
+                    for _ in $(seq 1 $((50 - bar_length))); do
+                        printf " "
+                    done
+                    printf "] %d/%d" "$processed_files" "$num_files"
+                fi
             fi
         done
         pids=("${new_pids[@]}")
@@ -110,10 +124,14 @@ run_terser() {
 num_files=$(find "$operating_dir/" -name '*.js' -not -name '*.min.js' -not -name 'requirejs-bundle-config.js' | wc -l)
 processed_files=0
 
+if (( ! silent )); then
+    printf "Minifying %d JavaScript files with %d jobs...\n" "$num_files" "$max_jobs"
+fi
+
 # Find all JavaScript files in the $operating_dir directory that need to be minified.
 # Use the -print0 option to handle filenames with spaces and other special characters.
 while IFS= read -r -d $'\0' file; do
-        wait_for_slot
+    wait_for_slot
 
     # Print the filename if the script is started with the -v or --verbose flag.
     if [ $verbose -eq 1 ]; then
@@ -133,4 +151,6 @@ for pid in "${pids[@]}"; do
 done
 
 # Move the cursor to the next line after the progress bar is finished.
-printf "\n"
+if (( display_progress_bar )); then
+  printf "\n"
+fi
