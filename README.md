@@ -35,6 +35,7 @@ By default, the script will minify all JavaScript files in the `pub/static/front
 The original files will be replaced with the minified versions. If your M2 instance is in developer mode, this might alter files outside of the `pub/static/frontend` directory because of symlinks.
 
 You can run the script with the `-v` or `--verbose` flag to display the name of each file that is being minified.
+Alternatively, you can run it with `--no-progress-bar` or with `--silent`, which includes `--no-progress-bar`.
 
 ### Parallel execution
 The script supports parallel execution of minification tasks to speed up the process. To specify the number of jobs to run in parallel, you can use the -j option followed by the number of jobs or --jobs= followed by the number of jobs.
