@@ -12,7 +12,11 @@ if ! command -v terser &> /dev/null; then
 fi
 
 # Check if the script is being run from the main directory of Magento.
-if [ ! -d "pub/static/frontend" ]; then
+if [ -d "pub/static/frontend" ]; then
+    operating_dir="pub/static/frontend"
+elif [ -d "init/pub/static/frontend" ]; then
+    operating_dir="init/pub/static/frontend"
+else
     echo "ERROR: You need to be in the main directory of Magento for this script to be run."
     exit 1
 fi
@@ -103,13 +107,13 @@ run_terser() {
 }
 
 # Count the number of JavaScript files that need to be minified.
-num_files=$(find pub/static/frontend/ -name '*.js' -not -name '*.min.js' -not -name 'requirejs-bundle-config.js' | wc -l)
+num_files=$(find "$operating_dir/" -name '*.js' -not -name '*.min.js' -not -name 'requirejs-bundle-config.js' | wc -l)
 processed_files=0
 
-# Find all JavaScript files in the pub/static/frontend directory that need to be minified.
+# Find all JavaScript files in the $operating_dir directory that need to be minified.
 # Use the -print0 option to handle filenames with spaces and other special characters.
 while IFS= read -r -d $'\0' file; do
-    wait_for_slot
+        wait_for_slot
 
     # Print the filename if the script is started with the -v or --verbose flag.
     if [ $verbose -eq 1 ]; then
@@ -121,8 +125,7 @@ while IFS= read -r -d $'\0' file; do
     pids+=("$!")
 
     sleep 0.1
-
-done < <(find pub/static/frontend/ -name '*.js' -not -name '*.min.js' -not -name 'requirejs-bundle-config.js' -print0)
+done < <(find "$operating_dir/" -name '*.js' -not -name '*.min.js' -not -name 'requirejs-bundle-config.js' -print0)
 
 # After the find loop, wait for remaining jobs
 for pid in "${pids[@]}"; do
