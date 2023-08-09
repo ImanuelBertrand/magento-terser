@@ -3,6 +3,7 @@
 A Bash script that uses `terser` to minify your JavaScript files and can be run in the root directory of your Magento 2 installation.
 
 The script will minify all JavaScript files in the pub/static/frontend directory of your Magento 2 installation, except for those that are already minified or the requirejs-bundle-config.js file.
+The minification tasks can be run in parallel for increased performance.
 
 ## Installation
 
@@ -34,6 +35,15 @@ By default, the script will minify all JavaScript files in the `pub/static/front
 The original files will be replaced with the minified versions. If your M2 instance is in developer mode, this might alter files outside of the `pub/static/frontend` directory because of symlinks.
 
 You can run the script with the `-v` or `--verbose` flag to display the name of each file that is being minified.
+
+### Parallel execution
+The script supports parallel execution of minification tasks to speed up the process. To specify the number of jobs to run in parallel, you can use the -j option followed by the number of jobs or --jobs= followed by the number of jobs.
+
+For example, to run 3 jobs in parallel, you could use either of the below commands:
+```
+vendor/bin/minify-m2-scripts.sh -j3
+vendor/bin/minify-m2-scripts.sh -jobs=3
+```
 
 ## License
 
