@@ -123,7 +123,7 @@ run_terser() {
 }
 
 # Count the number of JavaScript files that need to be minified.
-num_files=$(find "$operating_dir/" -name '*.js' -not -name '*.min.js' -not -name 'requirejs-bundle-config.js' | wc -l)
+num_files=$(find "$operating_dir/" -type f -name '*.js' -not -name '*.min.js' -not -name 'requirejs-bundle-config.js' | wc -l)
 processed_files=0
 
 if (( ! silent )); then
@@ -145,7 +145,7 @@ while IFS= read -r -d $'\0' file; do
     pids+=("$!")
 
     sleep 0.1
-done < <(find "$operating_dir/" -name '*.js' -not -name '*.min.js' -not -name 'requirejs-bundle-config.js' -print0)
+done < <(find "$operating_dir/" -type f -name '*.js' -not -name '*.min.js' -not -name 'requirejs-bundle-config.js' -print0)
 
 # After the find loop, wait for remaining jobs
 for pid in "${pids[@]}"; do
