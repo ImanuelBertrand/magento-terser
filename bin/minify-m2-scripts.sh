@@ -27,6 +27,8 @@ max_jobs=1
 pids=()
 display_progress_bar=1
 silent=0
+gzip=0
+gzip_keep=0
 
 # Parse arguments
 while (( $# )); do
@@ -65,6 +67,14 @@ while (( $# )); do
             verbose=1
             shift
         ;;
+        --gzip)
+            gzip=1
+            shift
+        ;;
+        --gzip-keep)
+            gzip_keep=1
+            shift
+        ;;
         -h|--help)
             echo "Usage: $0 [-j NUM_JOBS] [-v]"
             echo ""
@@ -88,6 +98,10 @@ while (( $# )); do
         ;;
     esac
 done
+
+if (( gzip_keep )); then
+    gzip=1
+fi
 
 if (( silent )); then
     display_progress_bar=0
@@ -120,7 +134,7 @@ wait_for_slot() {
         pids=("${new_pids[@]}")
         # If there's a free slot, break the loop
         (( ${#pids[@]} < max_jobs )) && return
-        sleep 0.1
+        sleep 0.01
     done
 }
 
@@ -150,14 +164,25 @@ while IFS= read -r -d $'\0' file; do
     # Minify the JavaScript file using the terser command in the background
     run_terser "$file" &
     pids+=("$!")
-
-    sleep 0.1
 done < <(find "$operating_dir/" -type f -name '*.js' -not -name '*.min.js' -not -name 'requirejs-bundle-config.js' -print0)
 
 # After the find loop, wait for remaining jobs
 for pid in "${pids[@]}"; do
     wait "$pid"
 done
+
+if (( gzip )); then
+    if (( ! silent )); then
+        printf "\n"
+        printf "Gzipping %d JavaScript files with %d jobs...\n" "$num_files" "$max_jobs"
+    fi
+
+    if (( gzip_keep )); then
+      find "$operating_dir/" -type f -name '*.js' -not -name '*.min.js' -not -name 'requirejs-bundle-config.js' -print0 | xargs -0 -P "$max_jobs" -I {} gzip -f -k {}
+    else
+      find "$operating_dir/" -type f -name '*.js' -not -name '*.min.js' -not -name 'requirejs-bundle-config.js' -print0 | xargs -0 -P "$max_jobs" -I {} gzip -f {}
+    fi
+fi
 
 # Move the cursor to the next line after the progress bar is finished.
 if (( display_progress_bar )); then
