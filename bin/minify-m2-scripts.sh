@@ -51,7 +51,14 @@ while (( $# )); do
             shift
         ;;
         --jobs=*)
-            max_jobs="${1#*=}"
+            if [[ ${1#*=} =~ ^[0-9]+$ ]]; then
+                max_jobs="${1#*=}"
+            elif [[ ${1#*=} == "auto" ]]; then
+                max_jobs=$(nproc)
+            else
+                echo "ERROR: Invalid value for jobs."
+                exit 1
+            fi
             shift
         ;;
         -v|--verbose)
