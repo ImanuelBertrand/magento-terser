@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-# Check if the terser command is available.
-if ! command -v terser &> /dev/null; then
+# Check if the terser command is available. TERSER_PACKAGE, below, stands in for it.
+if [ -z "$TERSER_PACKAGE" ] && ! command -v terser &> /dev/null; then
     if command -v npm &> /dev/null; then
         echo "ERROR: The terser command is not available. Please install terser by running:"
         echo "npm install terser -g"
@@ -10,6 +10,44 @@ if ! command -v terser &> /dev/null; then
     fi
     exit 1
 fi
+
+if ! command -v node &> /dev/null; then
+    echo "ERROR: terser is installed, but the node command it runs on is not available."
+    exit 1
+fi
+
+# Resolves symlinks through node rather than `readlink -f`, which macOS before 12.3 lacks.
+realpath_of() {
+    node -e 'process.stdout.write(require("fs").realpathSync(process.argv[1]))' "$1"
+}
+
+is_terser_package() {
+    [ -f "$1/package.json" ] && node -e 'process.exit(require(process.argv[1]).name === "terser" ? 0 : 1)' "$1/package.json" 2> /dev/null
+}
+
+# The minification runs through terser's API rather than its command, so it needs the package the
+# command belongs to. npm links the command to bin/terser inside it; a shim that is a script rather
+# than a link (pnpm, Volta) leads nowhere, so npm's global root is tried after that, and
+# TERSER_PACKAGE overrides both.
+# It is made absolute because the workers resolve it relative to their own file, not to the cwd.
+if [ -n "$TERSER_PACKAGE" ]; then
+    if ! terser_package=$(realpath_of "$TERSER_PACKAGE" 2> /dev/null) || ! is_terser_package "$terser_package"; then
+        echo "ERROR: TERSER_PACKAGE ($TERSER_PACKAGE) is not the directory of the terser package."
+        exit 1
+    fi
+else
+    terser_package=$(dirname "$(dirname "$(realpath_of "$(command -v terser)")")")
+    if ! is_terser_package "$terser_package" && command -v npm &> /dev/null; then
+        terser_package="$(npm root -g 2> /dev/null)/terser"
+    fi
+fi
+if ! is_terser_package "$terser_package"; then
+    echo "ERROR: Could not find the terser package that the terser command at $(command -v terser) belongs to."
+    echo "Set TERSER_PACKAGE to the directory of the terser package."
+    exit 1
+fi
+
+script_dir=$(dirname "$(realpath_of "${BASH_SOURCE[0]}")")
 
 # Check if the script is being run from the main directory of Magento.
 if [ -d "pub/static/frontend" ]; then
@@ -24,11 +62,11 @@ fi
 # Default values
 verbose=0
 max_jobs=1
-pids=()
 display_progress_bar=1
 silent=0
 gzip=0
 gzip_keep=0
+themes=()
 
 # Parse arguments
 while (( $# )); do
@@ -67,6 +105,23 @@ while (( $# )); do
             verbose=1
             shift
         ;;
+        --theme=*|--theme)
+            if [[ $1 == --theme ]]; then
+                theme=$2
+                shift
+            else
+                theme=${1#*=}
+            fi
+            if [[ ! $theme =~ ^[^/]+/[^/]+$ || /$theme/ == */./* || /$theme/ == */../* ]]; then
+                echo "ERROR: Invalid value for theme, expected Vendor/theme."
+                exit 1
+            fi
+            # Naming a theme twice would minify its files twice.
+            if [[ ! " ${themes[*]} " == *" $theme "* ]]; then
+                themes+=("$theme")
+            fi
+            shift
+        ;;
         --gzip)
             gzip=1
             shift
@@ -76,10 +131,12 @@ while (( $# )); do
             shift
         ;;
         -h|--help)
-            echo "Usage: $0 [-j NUM_JOBS] [-v]"
+            echo "Usage: $0 [-j NUM_JOBS] [--theme=Vendor/theme] [-v]"
             echo ""
             echo "Options:"
             echo "  -j NUM_JOBS, --jobs=NUM_JOBS   The number of jobs to run in parallel. Default is 1."
+            echo "  --theme=Vendor/theme           Only minify this theme. Can be given more than once."
+            echo "                                 Default is every theme."
             echo "  -v, --verbose                  Enable verbose mode."
             echo "  -h, --help                     Display this help message and exit."
             exit 0
@@ -107,69 +164,42 @@ if (( silent )); then
     display_progress_bar=0
 fi
 
-# Function to wait for a free slot in the jobs pool
-wait_for_slot() {
-    while : ; do
-        new_pids=()
-        for pid in "${pids[@]}"; do
-            # If the process is still running, add it to the new_pids array
-            if kill -0 "$pid" 2>/dev/null; then
-                new_pids+=("$pid")
-            else
-                # A job has finished. Update the progress bar.
-                if (( display_progress_bar )); then
-                    processed_files=$((processed_files+1))
-                    bar_length=$((processed_files * 50 / num_files))
-                    printf "\r["
-                    for _ in $(seq 1 $bar_length); do
-                        printf "="
-                    done
-                    for _ in $(seq 1 $((50 - bar_length))); do
-                        printf " "
-                    done
-                    printf "] %d/%d" "$processed_files" "$num_files"
-                fi
-            fi
-        done
-        pids=("${new_pids[@]}")
-        # If there's a free slot, break the loop
-        (( ${#pids[@]} < max_jobs )) && return
-        sleep 0.01
+# The directories to minify: the whole of $operating_dir, or each theme named with --theme.
+search_dirs=()
+if (( ${#themes[@]} )); then
+    for theme in "${themes[@]}"; do
+        if [ ! -d "$operating_dir/$theme" ]; then
+            echo "ERROR: Theme $theme has not been deployed to $operating_dir."
+            exit 1
+        fi
+        search_dirs+=("$operating_dir/$theme/")
     done
-}
+else
+    search_dirs=("$operating_dir/")
+fi
 
-run_terser() {
-    local file=$1
-    terser -c -m reserved=['$','jQuery','define','require','exports'] -o "$file" "$file" || printf "\rERROR: Failed to minify %s\n" "$file"
+find_scripts() {
+    find "${search_dirs[@]}" -type f -name '*.js' -not -name '*.min.js' -not -name 'requirejs-bundle-config.js' -print0
 }
 
 # Count the number of JavaScript files that need to be minified.
-num_files=$(find "$operating_dir/" -type f -name '*.js' -not -name '*.min.js' -not -name 'requirejs-bundle-config.js' | wc -l)
-processed_files=0
+num_files=$(find_scripts | tr -cd '\0' | wc -c)
 
 if (( ! silent )); then
     printf "Minifying %d JavaScript files with %d jobs...\n" "$num_files" "$max_jobs"
 fi
 
-# Find all JavaScript files in the $operating_dir directory that need to be minified.
-# Use the -print0 option to handle filenames with spaces and other special characters.
-while IFS= read -r -d $'\0' file; do
-    wait_for_slot
+minify_args=("--terser=$terser_package" "--jobs=$max_jobs")
+if (( verbose )); then
+    minify_args+=(--verbose)
+fi
+if (( ! display_progress_bar )); then
+    minify_args+=(--no-progress-bar)
+fi
 
-    # Print the filename if the script is started with the -v or --verbose flag.
-    if [ $verbose -eq 1 ]; then
-        printf "\rMinifying %s\n" "$file"
-    fi
-
-    # Minify the JavaScript file using the terser command in the background
-    run_terser "$file" &
-    pids+=("$!")
-done < <(find "$operating_dir/" -type f -name '*.js' -not -name '*.min.js' -not -name 'requirejs-bundle-config.js' -print0)
-
-# After the find loop, wait for remaining jobs
-for pid in "${pids[@]}"; do
-    wait "$pid"
-done
+# A file terser cannot parse is reported and left as it was; only a failure of the run itself
+# ends the script.
+find_scripts | node "$script_dir/minify-m2-scripts.cjs" "${minify_args[@]}" || exit 1
 
 if (( gzip )); then
     if (( ! silent )); then
@@ -178,9 +208,9 @@ if (( gzip )); then
     fi
 
     if (( gzip_keep )); then
-      find "$operating_dir/" -type f -name '*.js' -not -name '*.min.js' -not -name 'requirejs-bundle-config.js' -print0 | xargs -0 -P "$max_jobs" -I {} gzip -f -k {}
+      find_scripts | xargs -0 -P "$max_jobs" -I {} gzip -f -k {}
     else
-      find "$operating_dir/" -type f -name '*.js' -not -name '*.min.js' -not -name 'requirejs-bundle-config.js' -print0 | xargs -0 -P "$max_jobs" -I {} gzip -f {}
+      find_scripts | xargs -0 -P "$max_jobs" -I {} gzip -f {}
     fi
 fi
 
