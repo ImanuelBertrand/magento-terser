@@ -189,16 +189,19 @@ if (( ! silent )); then
     printf "Minifying %d JavaScript files with %d jobs...\n" "$num_files" "$max_jobs"
 fi
 
-minify_args=("--terser=$terser_package" "--jobs=$max_jobs")
+minify_args=("--terser=$terser_package" "--static-root=$(dirname "$operating_dir")" "--jobs=$max_jobs")
 if (( verbose )); then
     minify_args+=(--verbose)
 fi
 if (( ! display_progress_bar )); then
     minify_args+=(--no-progress-bar)
 fi
+if (( silent )); then
+    minify_args+=(--silent)
+fi
 
-# A file terser cannot parse is reported and left as it was; only a failure of the run itself
-# ends the script.
+# A file terser cannot parse is reported and left as it was; only a failure of the run itself,
+# or SRI hashes that could not be updated, ends the script.
 find_scripts | node "$script_dir/minify-m2-scripts.cjs" "${minify_args[@]}" || exit 1
 
 if (( gzip )); then

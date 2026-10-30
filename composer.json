@@ -1,7 +1,8 @@
 {
   "name": "ibertrand/magento2-terser",
-  "description": "A Bash script that minifies JavaScript files in a Magento installation",
-  "type": "binary",
+  "description": "Minifies the static JavaScript of a Magento 2 installation with terser in parallel, updating SRI hashes. Requires Node.js and terser.",
+  "keywords": ["magento", "magento2", "terser", "minify", "javascript", "sri"],
+  "homepage": "https://github.com/ImanuelBertrand/magento-terser",
   "license": "MIT",
   "authors": [
     {
@@ -9,7 +10,10 @@
       "email": "imanuel@bertrand.one"
     }
   ],
-  "require": {},
+  "support": {
+    "issues": "https://github.com/ImanuelBertrand/magento-terser/issues",
+    "source": "https://github.com/ImanuelBertrand/magento-terser"
+  },
   "bin": [
     "bin/minify-m2-scripts.sh"
   ]

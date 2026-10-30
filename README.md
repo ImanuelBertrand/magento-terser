@@ -62,10 +62,19 @@ vendor/bin/minify-m2-scripts.sh --theme=Vendor/theme --theme=Vendor/other
 
 The script exits with an error if a named theme has not been deployed.
 
-### Errors
-A file that terser cannot parse is left as it was. The script prints `ERROR: Failed to minify <file>`, with the reason on stderr, and continues; it still exits with 0.
+### Subresource Integrity
+Current Magento and Mage-OS releases record a [Subresource Integrity](https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity) hash for every deployed script, and put those hashes on the script tags of the payment pages. Minifying a file changes it, and a browser refuses a script whose hash no longer matches — on those pages only, so the checkout stops working while the rest of the shop looks fine.
 
-If a job itself fails, for example because Node runs out of memory, the script stops handing out files, lets the other jobs finish the file each one is working on, and exits with 1. Files that were not reached by then are left unminified.
+Magento 2.4.7-p8 to 2.4.8-p5 keep these hashes in `pub/static/<area>/sri-hashes.json`; Magento 2.4.9 and Mage-OS keep them in `pub/static/<area>/<Vendor>/<theme>/<locale>/sri-hashes.json`. The script therefore updates the hash of every file it rewrites in whichever of these files exist, once all files are minified. Run it after `setup:static-content:deploy`, as before, and nothing else needs to change.
+
+If an `sri-hashes.json` is not in the format described above, the script cannot update it. The scripts are minified by then, so the hashes in that file no longer match them: the script leaves the file as it was, prints an error, and exits with 1 without gzipping. Fix the file and run the script again, or run `setup:static-content:deploy` again. Where Magento keeps no such file, the script says so.
+
+Magento 2.4.7 up to 2.4.7-p7 keeps the hashes in its cache instead, where the script cannot update them. To minify on those versions, flush the cache after running the script with `bin/magento cache:flush`: Magento then has no hashes until the next `setup:static-content:deploy`, and loads the payment pages' scripts without them.
+
+### Errors
+A file that terser cannot parse is left as it was, and so is its SRI hash. The script prints `ERROR: Failed to minify <file>`, with the reason on stderr, and continues; it still exits with 0.
+
+If a job itself fails, for example because Node runs out of memory, the script stops handing out files, lets the other jobs finish the file each one is working on, and exits with 1. Files that were not reached by then are left unminified; the SRI hashes of the files that were minified are still updated.
 
 ## License
 
